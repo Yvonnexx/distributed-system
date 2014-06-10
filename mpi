@@ -1,0 +1,130 @@
+#include<iostream>
+#include<stdlib.h>
+#include<stdio.h>
+#include<sstream>
+#include<iomanip>
+#include<vector>
+#include<fstream>
+#include<string>
+#include<map>
+#include<stdio.h>
+#include<time.h>
+#include<iomanip>
+#include<algorithm>
+#include<mpi.h>
+
+using namespace std;
+
+class Node{
+	public:
+		vector<int> neigh;
+		vector<double> credit;
+		Node(){credit.push_back(1.0);}
+};
+
+int main(int argc,char** argv){
+	//setting up the MPI
+	int rank,numoftasks;
+	MPI_Init(&argc,&argv);
+	MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+	MPI_Comm_size(MPI_COMM_WORLD,&numoftasks);
+	MPI_Status status;
+	//reding the input file
+	clock_t start1,start2,end1,end2,end3;
+	start1 = clock();
+	ifstream infile1(argv[1]);
+	vector<int> it;
+	int id,degree,partition;
+	while(infile1>>id){
+		it.push_back(id);
+
+	}
+	int max = *(std::max_element(it.begin(),it.end()));
+	int pTable[max+1];
+	for(int i=0;i<=max;i++){
+		pTable[i] = -1;
+	}
+	ifstream infile2(argv[1]);
+	while(infile2>>id>>degree>>partition){
+		pTable[id] = partition;
+	}
+	Node* nodes = new Node[max+1];
+	ifstream infile3(argv[2]);
+	int id1,id2;
+	while(infile3>>id1>>id2){
+		if(pTable[id1]==rank){
+			nodes[id1].neigh.push_back(id2);
+		}
+		if(pTable[id2]==rank){
+			nodes[id2].neigh.push_back(id1);
+		}
+		
+	}
+	end1 = clock();
+	double t = (end1-start1)/CLOCKS_PER_SEC;
+	cout<<"time to read input files, partition"<<rank<<"="<<t<<"sec"<<endl;
+	MPI_Barrier(MPI_COMM_WORLD);
+	double *sendBuffer = new double[max+1];
+	double *recvBuffer = new double[max+1];
+	int round = atoi(argv[3]);
+	for(int m=0;m<round;m++){
+		start2 = clock();
+		for(int i=0;i<max+1;i++){
+			if(pTable[i]==rank){
+				sendBuffer[i] = (double)nodes[i].credit[m]/nodes[i].neigh.size();
+				recvBuffer[i] = sendBuffer[i];
+			}else{
+				sendBuffer[i] = 0.0;
+				recvBuffer[i] = 0.0;
+			}
+		}
+		for(int p=0;p<numoftasks;p++){
+			if(p==rank){
+				for(int x=0;x<numoftasks;x++){
+					if(x!=rank){
+						MPI_Send(sendBuffer,max+1,MPI_DOUBLE,x,m,MPI_COMM_WORLD);
+					}
+				}
+			}else{
+				double* tempBuffer = new double[max+1];
+				MPI_Recv(tempBuffer,max+1,MPI_DOUBLE,p,m,MPI_COMM_WORLD,&status);
+				for(int k=0;k<max+1;k++){
+					if(tempBuffer[k]!=0.0)	recvBuffer[k] = tempBuffer[k];
+				}
+			}
+		}
+		for(int i=1;i<max+1;i++){
+			nodes[i].credit.push_back(1.0);
+			double sum = 0.0;
+			for(int k=0;k<nodes[i].neigh.size();k++){
+				sum += recvBuffer[nodes[i].neigh[k]];
+			}
+			nodes[i].credit[m+1] = sum;
+		}
+		end2 = clock();
+		cout<<"--time for round"<<m+1<<"partition"<<rank<<"="<<float(end2-start2)/CLOCKS_PER_SEC<<"sec"<<endl;
+		MPI_Barrier(MPI_COMM_WORLD);
+		end3 = clock();
+		cout<<"--total time for round"<<m+1<<":"<<float(end3-start2)/CLOCKS_PER_SEC<<"sec"<<endl;
+	}
+	//output process
+	char buf[15];
+	sprintf(buf, "output%d",rank);	
+	FILE* fw = fopen(buf, "w");
+	for (int n = 1; n <= max+1; n++){
+		if (nodes[n].neigh.size()==0) continue;
+		std::stringstream stream;
+		for (int m=0;m<nodes[n].credit.size();m++){
+			stream <<std::setprecision(6) << std::fixed <<nodes[n].credit[m] << "\t" ;
+		}
+
+		fprintf(fw,"%d\t%d\t%s\n",n,(int)nodes[n].neigh.size(), stream.str().c_str());
+	}
+	
+	delete [] nodes;
+
+	MPI_Finalize();
+	return 0;
+}
+
+
